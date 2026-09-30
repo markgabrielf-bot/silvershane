@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reviewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --paper:#F1F4F7; --surface:#FFFFFF; --ink:#16232F; --muted:#586878; --line:#D3DCE4;
+  --brand:#0F5C6E; --brand-ink:#0A4453; --brand-soft:#DDEEF2;
+  --ok:#1D7A4B; --ok-soft:#DCF1E4; --bad:#B0343F; --bad-soft:#F8DFE2; --warn:#8A5A00; --warn-soft:#FBEFD5;
+  --head:"Bricolage Grotesque","Trebuchet MS",sans-serif;
+  --body:"Atkinson Hyperlegible","Segoe UI",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 1.0625rem/1.55 var(--body)}
+h1,h2,h3{font-family:var(--head);line-height:1.15;margin:0;font-weight:700}
+p{margin:0}
+button{font-family:inherit}
+:focus-visible{outline:3px solid #E8A317;outline-offset:2px}
+.muted{color:var(--muted)}
+.wrap{max-width:880px;margin:0 auto;padding:0 1.25rem}
+.main{padding-top:2rem;padding-bottom:4rem}
+.page-title{font-size:clamp(1.8rem,4vw,2.4rem);margin-bottom:.35rem}
+.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+
+/* top bar */
+.topbar{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.topbar-in{display:flex;align-items:center;gap:1rem;min-height:60px;flex-wrap:wrap;padding-top:.35rem;padding-bottom:.35rem}
+.brand{font:700 1.3rem var(--head);color:var(--brand);background:none;border:0;cursor:pointer;padding:0}
+.topbar nav{display:flex;gap:.25rem;margin-right:auto}
+.navlink{background:none;border:0;padding:.5rem .8rem;border-radius:8px;font-weight:700;color:var(--muted);cursor:pointer;min-height:44px}
+.navlink:hover{background:var(--brand-soft);color:var(--brand)}
+.navlink.on{color:var(--brand);background:var(--brand-soft)}
+.who{display:flex;align-items:center;gap:.5rem;font-size:.95rem;color:var(--muted)}
+
+/* buttons and fields */
+.btn{font:700 1rem var(--body);padding:.65rem 1.1rem;border-radius:10px;border:1.5px solid var(--brand);background:var(--surface);color:var(--brand);cursor:pointer;min-height:44px}
+.btn:hover{background:var(--brand-soft)}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-ink)}
+.btn-quiet{border-color:transparent;background:transparent}
+.btn-danger{border-color:var(--bad);color:var(--bad)}
+.btn-danger:hover{background:var(--bad-soft)}
+.btn-sm{padding:.4rem .8rem;min-height:38px;font-size:.95rem}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+label{display:block;font-weight:700;margin-bottom:.3rem}
+input[type=text],input[type=email],input[type=password],textarea{width:100%;font:inherit;padding:.65rem .8rem;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+input:focus,textarea:focus{border-color:var(--brand);outline:none;box-shadow:0 0 0 3px var(--brand-soft)}
+textarea{resize:vertical;min-height:84px}
+.field{margin-bottom:1rem}
+.hint{font-size:.92rem;color:var(--muted);margin-top:.25rem}
+.msg{min-height:1.4rem;margin:.25rem 0 .75rem;font-weight:700}
+.msg.err{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+.links{display:flex;gap:1.25rem;flex-wrap:wrap;margin-top:1rem}
+.linkbtn{background:none;border:0;padding:0;color:var(--brand);font-weight:700;text-decoration:underline;cursor:pointer;font-size:1rem}
+
+/* auth */
+.auth{min-height:100vh;display:grid;grid-template-columns:minmax(300px,5fr) 6fr}
+.auth-intro{background:var(--brand);color:#fff;padding:3rem;display:flex;flex-direction:column;justify-content:center;gap:1.25rem}
+.auth-intro h1{font-size:clamp(2.2rem,5vw,3.2rem)}
+.auth-intro p{max-width:34ch;opacity:.95}
+.tiles{display:flex;gap:.6rem}
+.tiles span{width:52px;height:52px;border:2px solid rgba(255,255,255,.55);border-radius:8px;display:grid;place-items:center;font:700 1.3rem var(--head)}
+.tiles .hit{background:#fff;color:var(--brand);border-color:#fff}
+.auth-form{padding:3rem 2rem;max-width:480px;width:100%;margin:auto}
+.auth-form h2{font-size:1.8rem;margin-bottom:.4rem}
+.auth-form .muted{margin-bottom:1.5rem}
+@media (max-width:760px){
+  .auth{grid-template-columns:1fr}
+  .auth-intro{padding:2rem 1.5rem}
+  .auth-form{padding:2rem 1.25rem}
+}
+
+/* dashboard */
+.tests{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0 1.25rem}
+.test{display:grid;grid-template-columns:1fr auto;gap:.6rem 1.5rem;align-items:center;padding:1.25rem 0;border-top:1px solid var(--line)}
+.test:first-child{border-top:0}
+.test h3{font-size:1.25rem;margin-bottom:.15rem}
+.test .desc{color:var(--muted);font-size:.98rem}
+.test-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
+.progress-row{display:flex;align-items:center;gap:.9rem;margin-top:.7rem}
+.progress{flex:1;height:10px;background:var(--brand-soft);border-radius:99px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--brand);border-radius:99px;transition:width .3s}
+.progress-row .label{font-size:.95rem;color:var(--muted);white-space:nowrap}
+.progress-row .label b{color:var(--ink)}
+@media (max-width:640px){
+  .test{grid-template-columns:1fr}
+  .test-actions{justify-content:flex-start}
+  .progress-row{flex-wrap:wrap}
+}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:14px;padding:2rem;text-align:center;color:var(--muted)}
+
+/* quiz */
+.quiz-top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem}
+.quiz-title{font-size:1.3rem;color:var(--muted);font-weight:500;margin-bottom:.5rem}
+.qpanel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:clamp(1.25rem,4vw,2rem);margin-top:1rem}
+.qtext{font:500 clamp(1.35rem,3.6vw,1.85rem)/1.3 var(--head);white-space:pre-wrap;margin-bottom:1.5rem}
+.choices{display:grid;gap:.7rem}
+.choice{display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:.9rem;text-align:left;width:100%;padding:.7rem .9rem .7rem .7rem;border:2px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font:400 1.05rem/1.4 var(--body);cursor:pointer;min-height:58px}
+.choice:hover:not(:disabled){border-color:var(--brand)}
+.choice .letter{width:44px;height:44px;border-radius:8px;background:var(--paper);display:grid;place-items:center;font:700 1.15rem var(--head);color:var(--brand)}
+.choice .tag{font-size:.88rem;font-weight:700;white-space:nowrap}
+.choice.selected{border-color:var(--brand);background:var(--brand-soft)}
+.choice.selected .letter{background:var(--brand);color:#fff}
+.choice:disabled{cursor:default}
+.choice.correct{border-color:var(--ok);background:var(--ok-soft)}
+.choice.correct .letter{background:var(--ok);color:#fff}
+.choice.correct .tag{color:var(--ok)}
+.choice.wrong{border-color:var(--bad);background:var(--bad-soft)}
+.choice.wrong .letter{background:var(--bad);color:#fff}
+.choice.wrong .tag{color:var(--bad)}
+.feedback{margin-top:1.25rem;padding:1rem 1.1rem;border-radius:12px}
+.feedback.good{background:var(--ok-soft);color:#0E4A2B}
+.feedback.miss{background:var(--bad-soft);color:#6E1D26}
+.feedback strong{font-family:var(--head);font-size:1.15rem;display:block;margin-bottom:.2rem}
+.feedback p+p{margin-top:.4rem}
+.qactions{margin-top:1.5rem;display:flex;justify-content:flex-end}
+@media (max-width:520px){
+  .choice{grid-template-columns:40px 1fr;}
+  .choice .tag{grid-column:2}
+  .choice .letter{width:40px;height:40px}
+}
+
+/* results */
+.results{text-align:center;padding:2.25rem 1.25rem}
+.score{font:700 clamp(3.2rem,12vw,5.5rem)/1 var(--head);color:var(--brand)}
+.score small{font-size:.4em;color:var(--muted);font-weight:500}
+.results .row{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem}
+.review{margin-top:2rem}
+.review h2{font-size:1.4rem;margin-bottom:1rem}
+.miss-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.25rem;margin-bottom:.8rem}
+.miss-item .q{font-weight:700;white-space:pre-wrap;margin-bottom:.5rem}
+.miss-item .yours{color:var(--bad)}
+.miss-item .right{color:var(--ok)}
+.miss-item .why{margin-top:.5rem;color:var(--muted)}
+
+/* admin */
+.pill{display:inline-block;padding:.1rem .65rem;border-radius:99px;font-size:.85rem;font-weight:700;margin-left:.5rem;vertical-align:middle}
+.pill.pub{background:var(--ok-soft);color:var(--ok)}
+.pill.draft{background:var(--warn-soft);color:var(--warn)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem}
+.panel h2{font-size:1.3rem;margin-bottom:.35rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
+.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1rem}
+@media (max-width:700px){.import-grid{grid-template-columns:1fr}}
+input[type=file]{font:inherit;max-width:100%}
+.qcard{background:var(--surface);border:2px solid var(--line);border-radius:12px;padding:1.1rem 1.25rem;margin-bottom:1rem}
+.qcard.has-err{border-color:var(--bad)}
+.qcard-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.8rem;flex-wrap:wrap}
+.qcard-head h3{font-size:1.1rem}
+.choice-edit{display:grid;grid-template-columns:auto 34px 1fr;gap:.6rem;align-items:center;margin-bottom:.5rem}
+.choice-edit .letter{width:34px;height:34px;border-radius:6px;background:var(--paper);display:grid;place-items:center;font:700 1rem var(--head);color:var(--brand)}
+.choice-edit input[type=radio]{width:22px;height:22px;accent-color:var(--brand)}
+fieldset{border:0;padding:0;margin:0 0 1rem}
+legend{font-weight:700;margin-bottom:.4rem;padding:0}
+.qerr{color:var(--bad);font-weight:700;margin-top:.5rem;min-height:0}
+.savebar{position:sticky;bottom:0;z-index:4;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;margin-top:1.5rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.adm-row{display:grid;grid-template-columns:1fr auto;gap:.5rem 1rem;align-items:center;padding:1rem 0;border-top:1px solid var(--line)}
+.adm-row:first-child{border-top:0}
+.adm-row h3{font-size:1.15rem}
+@media (max-width:640px){.adm-row{grid-template-columns:1fr}}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:1.25rem;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:.7rem 1.1rem;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;max-width:90vw;font-weight:700}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{background:var(--bad)}
+.toast.good{background:var(--ok)}
+.setup{max-width:640px;margin:4rem auto;padding:0 1.25rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<noscript><p style="padding:2rem">This site needs JavaScript to run.</p></noscript>
+
+<script>
+(function () {
+'use strict';
+
+/* ============ CONFIG: paste your own values here ============ */
+const SUPABASE_URL = "https://iobcybumigiiodsxzhgi.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY";
+const APP_NAME = "Reviewer";
+/* ============================================================ */
+
+const app = document.getElementById('app');
+const toastEl = document.getElementById('toast');
+document.title = APP_NAME;
+
+if (SUPABASE_URL.indexOf('PASTE_') === 0 || SUPABASE_ANON_KEY.indexOf('PASTE_') === 0) {
+  app.innerHTML = '<div class="setup"><h1>Almost there</h1><p style="margin-top:.75rem">Open <b>index.html</b> in a text editor and paste your Supabase project URL and anon key near the top of the script, where it says CONFIG. Then upload the file again.</p></div>';
+  return;
+}
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const state = { session: null, userId: null, profile: null, view: 'loading', quiz: null, ed: null, busy: false, pendingEmail: '' };
+let keySeq = 0;
+const newKey = () => 'k' + (++keySeq);
+const LETTERS = ['A', 'B', 'C', 'D'];
+
+/* ---------------- helpers ---------------- */
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function toast(msg, kind) {
+  toastEl.textContent = msg;
+  toastEl.className = 'toast show ' + (kind || '');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { toastEl.className = 'toast'; }, 4200);
+}
+function unwrap(r) { if (r.error) throw r.error; return r.data; }
+function friendly(err) {
+  const m = (err && err.message) || '';
+  if (/invalid login/i.test(m)) return 'Email or password is incorrect.';
+  if (/not confirmed/i.test(m)) return 'Confirm your email first. Check your inbox for the confirmation link.';
+  if (/rate limit|too many/i.test(m)) return 'Too many attempts. Wait a few minutes and try again.';
+  if (/password should be at least/i.test(m)) return 'Password must be at least 8 characters.';
+  if (/failed to fetch|network/i.test(m)) return 'Could not connect. Check your internet and try again.';
+  return m || 'Something went wrong. Try again.';
+}
+function pageUrl() { return window.location.origin + window.location.pathname; }
+function go(view) { state.view = view; render(); window.scrollTo(0, 0); }
+function displayName() {
+  const p = state.profile || {};
+  return p.full_name || p.email || (state.session && state.session.user && state.session.user.email) || '';
+}
+function loading(active) {
+  app.innerHTML = shell('<p class="muted">Loading...</p>', active);
+}
+
+/* ---------------- shell ---------------- */
+function shell(inner, active) {
+  const admin = state.profile && state.profile.is_admin;
+  return `<header class="topbar"><div class="wrap topbar-in">
+    <button class="brand" data-act="go" data-view="dashboard">${esc(APP_NAME)}</button>
+    <nav aria-label="Main">
+      <button class="navlink ${active === 'dashboard' ? 'on' : ''}" data-act="go" data-view="dashboard">My tests</button>
+      ${admin ? `<button class="navlink ${active === 'admin' ? 'on' : ''}" data-act="go" data-view="admin">Admin</button>` : ''}
+    </nav>
+    <div class="who"><span>${esc(displayName())}</span><button class="btn btn-quiet btn-sm" data-act="signout">Log out</button></div>
+  </div></header><main class="wrap main">${inner}</main>`;
+}
+
+/* ---------------- auth views ---------------- */
+function authFrame(title, sub, body) {
+  app.innerHTML = `<div class="auth">
+    <section class="auth-intro">
+      <div class="tiles" aria-hidden="true"><span>A</span><span>B</span><span class="hit">C</span><span>D</span></div>
+      <h1>${esc(APP_NAME)}</h1>
+      <p>Answer practice questions at your own pace. Your progress is saved after every question, so you can stop and continue anytime.</p>
+    </section>
+    <section class="auth-form"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ''}${body}</section>
+  </div>`;
+}
+function viewLogin() {
+  authFrame('Log in', 'Welcome back.', `
+    <form data-form="login" novalidate>
+      <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <p class="msg" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Log in</button>
+      <div class="links">
+        <button type="button" class="linkbtn" data-act="go" data-view="forgot">Forgot password?</button>
+        <button type="button" class="linkbtn" data-act="go" data-view="signup">Create an account</button>
+      </div>
+    </form>`);
+}
+function viewSignup() {
+  authFrame('Create your account', 'We will email you a link to confirm it.', `
+    <form data-form="signup" novalidate>
+      <div class="field"><label for="full_name">Name</label><input id="full_name" name="full_name" type="text" autocomplete="name" required></div>
+      <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" required><p class="hint">At least 8 characters.</p></div>
+      <div class="field"><label for="confirm">Confirm password</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" required></div>
+      <p class="msg" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Create account</button>
+      <div class="links"><button type="button" class="linkbtn" data-act="go" data-view="login">I already have an account</button></div>
+    </form>`);
+}
+function viewSignupDone() {
+  authFrame('Check your email', '', `
+    <p>We sent a confirmation link to <b>${esc(state.pendingEmail)}</b>. Open it to activate your account, then log in.</p>
+    <p class="hint" style="margin-top:.6rem">Nothing there? Check your spam folder.</p>
+    <div class="links"><button class="btn btn-primary" data-act="go" data-view="login">Go to log in</button></div>`);
+}
+function viewForgot() {
+  authFrame('Reset your password', 'Enter your email and we will send you a reset link.', `
+    <form data-form="forgot" novalidate>
+      <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+      <p class="msg" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Send reset link</button>
+      <div class="links"><button type="button" class="linkbtn" data-act="go" data-view="login">Back to log in</button></div>
+    </form>`);
+}
+function viewReset() {
+  authFrame('Choose a new password', '', `
+    <form data-form="reset" novalidate>
+      <div class="field"><label for="password">New password</label><input id="password" name="password" type="password" autocomplete="new-password" required><p class="hint">At least 8 characters.</p></div>
+      <div class="field"><label for="confirm">Confirm new password</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" required></div>
+      <p class="msg" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Save new password</button>
+    </form>`);
+}
+
+const forms = {
+  async login(f) {
+    const { error } = await sb.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
+    if (error) throw error;
+  },
+  async signup(f) {
+    const full_name = f.full_name.value.trim();
+    const email = f.email.value.trim();
+    const password = f.password.value;
+    if (!full_name) throw { message: 'Enter your name.' };
+    if (!email) throw { message: 'Enter your email.' };
+    if (password.length < 8) throw { message: 'Password must be at least 8 characters.' };
+    if (password !== f.confirm.value) throw { message: 'Passwords do not match.' };
+    const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name }, emailRedirectTo: pageUrl() } });
+    if (error) throw error;
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      throw { message: 'An account with this email already exists. Log in instead.' };
+    }
+    if (data.session) return;
+    state.pendingEmail = email;
+    go('signupDone');
+  },
+  async forgot(f, msg) {
+    const email = f.email.value.trim();
+    if (!email) throw { message: 'Enter your email.' };
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: pageUrl() });
+    if (error) throw error;
+    msg.textContent = 'If an account exists for ' + email + ', a reset link is on its way. Check your inbox.';
+    msg.className = 'msg ok';
+  },
+  async reset(f) {
+    const password = f.password.value;
+    if (password.length < 8) throw { message: 'Password must be at least 8 characters.' };
+    if (password !== f.confirm.value) throw { message: 'Passwords do not match.' };
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) throw error;
+    const { data } = await sb.auth.getSession();
+    state.session = data.session;
+    state.userId = data.session ? data.session.user.id : null;
+    await loadProfile();
+    toast('Password updated.', 'good');
+    go('dashboard');
+  }
+};
+
+document.addEventListener('submit', async e => {
+  const f = e.target.closest('form[data-form]');
+  if (!f) return;
+  e.preventDefault();
+  const msg = f.querySelector('.msg');
+  const btn = f.querySelector('button[type=submit]');
+  msg.textContent = ''; msg.className = 'msg';
+  btn.disabled = true;
+  try { await forms[f.dataset.form](f, msg); }
+  catch (err) { msg.textContent = friendly(err); msg.className = 'msg err'; }
+  finally { btn.disabled = false; }
+});
+
+/* ---------------- auth state ---------------- */
+async function loadProfile() {
+  const { data } = await sb.from('profiles').select('*').eq('id', state.userId).maybeSingle();
+  state.profile = data || { full_name: '', email: state.session && state.session.user ? state.session.user.email : '', is_admin: false };
+}
+async function onAuth(event, session) {
+  if (event === 'PASSWORD_RECOVERY') { state.session = session; state.view = 'reset'; render(); return; }
+  if (event === 'SIGNED_OUT') {
+    state.session = null; state.userId = null; state.profile = null; state.quiz = null; state.ed = null;
+    go('login');
+    return;
+  }
+  if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+    state.session = session;
+    if (!session) { if (event === 'INITIAL_SESSION') go('login'); return; }
+    if (state.view === 'reset') return;
+    if (state.userId !== session.user.id) {
+      state.userId = session.user.id;
+      await loadProfile();
+      go('dashboard');
+    }
+  }
+}
+sb.auth.onAuthStateChange((event, session) => { setTimeout(() => onAuth(event, session), 0); });
+
+/* ---------------- dashboard ---------------- */
+async function viewDashboard() {
+  loading('dashboard');
+  try {
+    const rs = await Promise.all([
+      sb.from('questionnaires').select('id,title,description,published_at,questions(count)').eq('status', 'published').order('published_at', { ascending: false }),
+      sb.from('attempts').select('id,questionnaire_id,started_at,completed_at,score,attempt_answers(count)').eq('user_id', state.userId).order('started_at', { ascending: false })
+    ]);
+    const qns = unwrap(rs[0]);
+    const atts = unwrap(rs[1]);
+    if (state.view !== 'dashboard') return;
+    const latest = {};
+    atts.forEach(a => { if (!latest[a.questionnaire_id]) latest[a.questionnaire_id] = a; });
+
+    const rows = qns.map(q => {
+      const total = q.questions && q.questions[0] ? q.questions[0].count : 0;
+      const a = latest[q.id];
+      const answered = a ? (a.attempt_answers && a.attempt_answers[0] ? a.attempt_answers[0].count : 0) : 0;
+      const done = a && a.completed_at;
+      const pct = done ? 100 : (total ? Math.min(100, Math.round(answered / total * 100)) : 0);
+      let label, actions;
+      if (!total) {
+        label = 'No questions yet';
+        actions = '';
+      } else if (done) {
+        label = `Completed. Score <b>${a.score} of ${total}</b>`;
+        actions = `<button class="btn btn-quiet" data-act="start" data-mode="results" data-id="${q.id}">View results</button>
+                   <button class="btn btn-primary" data-act="start" data-mode="retake" data-id="${q.id}">Retake</button>`;
+      } else if (a && answered > 0) {
+        label = `<b>${answered} of ${total}</b> answered`;
+        actions = `<button class="btn btn-primary" data-act="start" data-mode="continue" data-id="${q.id}">Continue</button>`;
+      } else {
+        label = `${total} question${total === 1 ? '' : 's'}`;
+        actions = `<button class="btn btn-primary" data-act="start" data-mode="continue" data-id="${q.id}">Start</button>`;
+      }
+      return `<div class="test">
+        <div>
+          <h3>${esc(q.title)}</h3>
+          ${q.description ? `<p class="desc">${esc(q.description)}</p>` : ''}
+          <div class="progress-row">
+            <div class="progress" role="progressbar" aria-label="Progress for ${esc(q.title)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>
+            <span class="label">${label}</span>
+          </div>
+        </div>
+        <div class="test-actions">${actions}</div>
+      </div>`;
+    }).join('');
+
+    const isAdmin = state.profile && state.profile.is_admin;
+    const empty = `<div class="empty"><p>No tests are available yet.</p><p style="margin-top:.3rem">${isAdmin ? 'Open the Admin tab to upload and publish one.' : 'Check back soon.'}</p></div>`;
+    app.innerHTML = shell(`
+      <div class="page-head"><div><h1 class="page-title">My tests</h1><p class="muted">Pick a test to start, or continue where you left off.</p></div></div>
+      ${rows ? `<div class="tests">${rows}</div>` : empty}`, 'dashboard');
+  } catch (err) {
+    app.innerHTML = shell(`<p class="msg err">${esc(friendly(err))}</p><button class="btn" data-act="go" data-view="dashboard">Try again</button>`, 'dashboard');
+  }
+}
+
+/* ---------------- quiz ---------------- */
+async function openQuiz(id, mode) {
+  loading('dashboard');
+  try {
+    const rs = await Promise.all([
+      sb.from('questionnaires').select('id,title').eq('id', id).single(),
+      sb.from('questions').select('*').eq('questionnaire_id', id).order('position'),
+      sb.from('attempts').select('*').eq('questionnaire_id', id).eq('user_id', state.userId).order('started_at', { ascending: false }).limit(1)
+    ]);
+    const qn = unwrap(rs[0]), qs = unwrap(rs[1]), atts = unwrap(rs[2]);
+    if (!qs.length) { toast('This test has no questions yet.', 'bad'); return go('dashboard'); }
+    let attempt = atts[0];
+    if (mode === 'retake' || !attempt || (attempt.completed_at && mode === 'continue')) {
+      attempt = unwrap(await sb.from('attempts').insert({ user_id: state.userId, questionnaire_id: id }).select().single());
+    }
+    const ans = unwrap(await sb.from('attempt_answers').select('question_id,chosen,is_correct').eq('attempt_id', attempt.id));
+    const answers = new Map(ans.map(a => [a.question_id, a]));
+    state.quiz = { qn, qs, attempt, answers, idx: 0, selected: null, checked: false };
+    if (mode === 'results' && attempt.completed_at) { go('results'); return; }
+    const first = qs.findIndex(q => !answers.has(q.id));
+    if (first === -1) { await finishAttempt(); return; }
+    state.quiz.idx = first;
+    go('quiz');
+  } catch (err) {
+    toast(friendly(err), 'bad');
+    go('dashboard');
+  }
+}
+
+function renderQuiz() {
+  const qz = state.quiz;
+  if (!qz) return go('dashboard');
+  const total = qz.qs.length;
+  const q = qz.qs[qz.idx];
+  const answered = qz.answers.size;
+  const pct = Math.round(answered / total * 100);
+  const rec = qz.answers.get(q.id);
+  const chosen = qz.checked && rec ? rec.chosen : qz.selected;
+  const isLast = !qz.qs.some((x, i) => i > qz.idx && !qz.answers.has(x.id));
+
+  const choices = LETTERS.map(L => {
+    const text = q['choice_' + L.toLowerCase()];
+    let cls = 'choice', tag = '';
+    if (qz.checked) {
+      if (L === q.correct_answer) { cls += ' correct'; tag = chosen === L ? 'Your answer, correct' : 'Correct answer'; }
+      else if (L === chosen) { cls += ' wrong'; tag = 'Your answer'; }
+    } else if (L === chosen) { cls += ' selected'; }
+    return `<button class="${cls}" data-act="choose" data-letter="${L}" ${qz.checked ? 'disabled' : ''} aria-pressed="${L === chosen}">
+      <span class="letter">${L}</span><span>${esc(text)}</span>${tag ? `<span class="tag">${tag}</span>` : '<span></span>'}
+    </button>`;
+  }).join('');
+
+  let feedback = '';
+  if (qz.checked && rec) {
+    const good = rec.is_correct;
+    feedback = `<div class="feedback ${good ? 'good' : 'miss'}" role="status">
+      <strong>${good ? 'Correct.' : 'Not quite.'}</strong>
+      ${good ? '' : `<p>The correct answer is ${q.correct_answer}: ${esc(q['choice_' + q.correct_answer.toLowerCase()])}</p>`}
+      ${q.explanation ? `<p>${esc(q.explanation)}</p>` : ''}
+    </div>`;
+  }
+
+  const action = qz.checked
+    ? `<button class="btn btn-primary" id="nextBtn" data-act="next">${isLast ? 'See results' : 'Next question'}</button>`
+    : `<button class="btn btn-primary" id="checkBtn" data-act="check" ${qz.selected ? '' : 'disabled'}>Check answer</button>`;
+
+  app.innerHTML = `<main class="wrap main">
+    <div class="quiz-top">
+      <button class="btn btn-quiet" data-act="go" data-view="dashboard">Back to my tests</button>
+      <span class="muted">Progress saves automatically</span>
+    </div>
+    <h1 class="quiz-title">${esc(qz.qn.title)}</h1>
+    <div class="progress-row">
+      <div class="progress" role="progressbar" aria-label="Test progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${answered}"><i style="width:${pct}%"></i></div>
+      <span class="label">Question <b>${qz.idx + 1}</b> of ${total}</span>
+    </div>
+    <section class="qpanel">
+      <p class="qtext">${esc(q.question)}</p>
+      <div class="choices" role="group" aria-label="Answer choices">${choices}</div>
+      ${feedback}
+      <div class="qactions">${action}</div>
+    </section>
+  </main>`;
+}
+
+function choose(letter) {
+  const qz = state.quiz;
+  if (!qz || qz.checked || state.view !== 'quiz') return;
+  qz.selected = letter;
+  renderQuiz();
+  const b = document.getElementById('checkBtn');
+  if (b) b.focus();
+}
+async function checkAnswer() {
+  const qz = state.quiz;
+  if (!qz || !qz.selected || qz.checked || state.busy) return;
+  state.busy = true;
+  const q = qz.qs[qz.idx];
+  try {
+    const row = unwrap(await sb.from('attempt_answers')
+      .insert({ attempt_id: qz.attempt.id, question_id: q.id, user_id: state.userId, chosen: qz.selected })
+      .select('question_id,chosen,is_correct').single());
+    qz.answers.set(q.id, row);
+    qz.checked = true;
+    renderQuiz();
+    const b = document.getElementById('nextBtn');
+    if (b) b.focus();
+  } catch (err) {
+    if (err && err.code === '23505') {
+      toast('That question was already answered. Reloading your progress.', 'bad');
+      state.busy = false;
+      return openQuiz(qz.qn.id, 'continue');
+    }
+    toast('Could not save your answer. Check your connection and try again.', 'bad');
+  } finally { state.busy = false; }
+}
+async function nextQuestion() {
+  const qz = state.quiz;
+  if (!qz || !qz.checked) return;
+  qz.selected = null; qz.checked = false;
+  const nxt = qz.qs.findIndex((q, i) => i > qz.idx && !qz.answers.has(q.id));
+  try {
+    if (nxt === -1) await finishAttempt();
+    else { qz.idx = nxt; renderQuiz(); window.scrollTo(0, 0); }
+  } catch (err) { toast(friendly(err), 'bad'); }
+}
+async function finishAttempt() {
+  const qz = state.quiz;
+  let score = 0;
+  qz.answers.forEach(a => { if (a.is_correct) score++; });
+  if (!qz.attempt.completed_at) {
+    qz.attempt = unwrap(await sb.from('attempts').update({ completed_at: new Date().toISOString(), score }).eq('id', qz.attempt.id).select().single());
+  }
+  go('results');
+}
+function viewResults() {
+  const qz = state.quiz;
+  if (!qz) return go('dashboard');
+  const total = qz.qs.length;
+  const score = qz.attempt.score == null ? 0 : qz.attempt.score;
+  const pct = total ? Math.round(score / total * 100) : 0;
+  const missed = qz.qs.filter(q => { const a = qz.answers.get(q.id); return a && !a.is_correct; });
+  const items = missed.map(q => {
+    const a = qz.answers.get(q.id);
+    const yours = a.chosen, right = q.correct_answer;
+    return `<div class="miss-item">
+      <p class="q">${esc(q.question)}</p>
+      <p class="yours">Your answer: ${yours}. ${esc(q['choice_' + yours.toLowerCase()])}</p>
+      <p class="right">Correct answer: ${right}. ${esc(q['choice_' + right.toLowerCase()])}</p>
+      ${q.explanation ? `<p class="why">${esc(q.explanation)}</p>` : ''}
+    </div>`;
+  }).join('');
+  app.innerHTML = shell(`
+    <div class="panel results">
+      <p class="muted">${esc(qz.qn.title)}</p>
+      <p class="score">${score}<small> / ${total}</small></p>
+      <p style="margin-top:.4rem;font-size:1.15rem">${pct}% correct</p>
+      <div class="row">
+        <button class="btn btn-primary" data-act="start" data-mode="retake" data-id="${qz.qn.id}">Retake this test</button>
+        <button class="btn" data-act="go" data-view="dashboard">Back to my tests</button>
+      </div>
+    </div>
+    <section class="review">
+      <h2>${missed.length ? 'Questions to review' : 'No missed questions'}</h2>
+      ${missed.length ? items : '<p class="muted">You got every question right.</p>'}
+    </section>`, 'dashboard');
+}
+
+document.addEventListener('keydown', e => {
+  if (state.view !== 'quiz' || !state.quiz || state.quiz.checked) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest('input,textarea')) return;
+  const k = e.key.toUpperCase();
+  const map = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
+  const letter = (k.length === 1 && 'ABCD'.indexOf(k) > -1) ? k : map[k];
+  if (letter) choose(letter);
+});
+
+/* ---------------- CSV ---------------- */
+const TEMPLATE = 'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation\r\n' +
+  'What is the capital of the Philippines?,Cebu,Manila,Davao,Baguio,B,Manila is the national capital.\r\n' +
+  'How many minutes are in 2 hours?,60,90,120,180,C,2 x 60 = 120.\r\n';
+
+function detectDelim(text) {
+  const first = text.replace(/^\uFEFF/, '').split(/\r?\n/)[0] || '';
+  const c = { ',': 0, '\t': 0, ';': 0 };
+  for (const ch of first) { if (Object.prototype.hasOwnProperty.call(c, ch)) c[ch]++; }
+  return Object.keys(c).sort((a, b) => c[b] - c[a])[0];
+}
+function parseCSVRows(text, delim) {
+  text = text.replace(/^\uFEFF/, '');
+  const rows = []; let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"' && field === '') { inQ = true; }
+    else if (c === delim) { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = ''; rows.push(row); row = [];
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim() !== ''));
+}
+const ALIAS = {
+  question: ['question', 'questions', 'q'],
+  a: ['choice_a', 'a', 'option_a', 'choicea', 'optiona'],
+  b: ['choice_b', 'b', 'option_b', 'choiceb', 'optionb'],
+  c: ['choice_c', 'c', 'option_c', 'choicec', 'optionc'],
+  d: ['choice_d', 'd', 'option_d', 'choiced', 'optiond'],
+  correct: ['correct_answer', 'correct', 'answer', 'correct_option', 'key'],
+  explanation: ['explanation', 'rationale', 'reason']
+};
+function normAnswer(raw, q) {
+  const v = (raw || '').trim();
+  if (/^[a-d]$/i.test(v)) return v.toUpperCase();
+  const m = v.match(/^(?:choice|option)?\s*([a-d])\s*[).:\-]?$/i);
+  if (m) return m[1].toUpperCase();
+  const low = v.toLowerCase();
+  if (low) for (const L of LETTERS) { if ((q[L.toLowerCase()] || '').trim().toLowerCase() === low) return L; }
+  return '';
+}
+function parseQuestions(text) {
+  const rows = parseCSVRows(text, detectDelim(text));
+  if (rows.length < 2) throw new Error('No questions found. Make sure the first row is the header row and questions start on row 2.');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[\s\-]+/g, '_'));
+  const idx = {}, missing = [];
+  Object.keys(ALIAS).forEach(k => {
+    idx[k] = head.findIndex(h => ALIAS[k].indexOf(h) > -1);
+    if (idx[k] === -1 && k !== 'explanation') missing.push(k === 'question' ? 'question' : k === 'correct' ? 'correct_answer' : 'choice_' + k);
+  });
+  if (missing.length) throw new Error('Missing column(s): ' + missing.join(', ') + '. Use the template for the right headers.');
+  const get = (r, k) => idx[k] > -1 ? (r[idx[k]] || '').trim() : '';
+  return rows.slice(1).map(r => {
+    const q = { key: newKey(), question: get(r, 'question'), a: get(r, 'a'), b: get(r, 'b'), c: get(r, 'c'), d: get(r, 'd'), explanation: get(r, 'explanation') };
+    q.correct = normAnswer(get(r, 'correct'), q);
+    return q;
+  });
+}
+function downloadTemplate() {
+  const blob = new Blob(['\uFEFF' + TEMPLATE], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'questions-template.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ---------------- admin list ---------------- */
+async function viewAdmin() {
+  if (!(state.profile && state.profile.is_admin)) { toast('Admin access only.', 'bad'); return go('dashboard'); }
+  loading('admin');
+  try {
+    const rows = unwrap(await sb.from('questionnaires').select('id,title,status,created_at,questions(count)').order('created_at', { ascending: false }));
+    if (state.view !== 'admin') return;
+    const list = rows.map(r => {
+      const count = r.questions && r.questions[0] ? r.questions[0].count : 0;
+      const pub = r.status === 'published';
+      return `<div class="adm-row">
+        <div><h3>${esc(r.title)}<span class="pill ${pub ? 'pub' : 'draft'}">${pub ? 'Published' : 'Draft'}</span></h3>
+          <p class="muted">${count} question${count === 1 ? '' : 's'}</p></div>
+        <div class="row">
+          <button class="btn btn-sm" data-act="adm-edit" data-id="${r.id}">Review and edit</button>
+          <button class="btn btn-sm" data-act="adm-toggle" data-id="${r.id}" data-status="${r.status}" data-count="${count}">${pub ? 'Unpublish' : 'Publish'}</button>
+          <button class="btn btn-sm btn-danger" data-act="adm-delete" data-id="${r.id}" data-title="${esc(r.title)}">Delete</button>
+        </div></div>`;
+    }).join('');
+    app.innerHTML = shell(`
+      <div class="page-head"><div><h1 class="page-title">Admin</h1><p class="muted">Upload questions, review them, then publish to users.</p></div>
+        <button class="btn btn-primary" data-act="adm-new">New questionnaire</button></div>
+      ${rows.length ? `<div class="tests">${list}</div>` : '<div class="empty"><p>No questionnaires yet.</p><p style="margin-top:.3rem">Click New questionnaire to upload your first CSV.</p></div>'}`, 'admin');
+  } catch (err) {
+    app.innerHTML = shell(`<p class="msg err">${esc(friendly(err))}</p><button class="btn" data-act="go" data-view="admin">Try again</button>`, 'admin');
+  }
+}
+async function toggleStatus(id, status, count) {
+  try {
+    if (status !== 'published' && !Number(count)) { toast('Add at least one question before publishing.', 'bad'); return; }
+    const pub = status !== 'published';
+    unwrap(await sb.from('questionnaires').update({ status: pub ? 'published' : 'draft', published_at: pub ? new Date().toISOString() : null }).eq('id', id).select());
+    toast(pub ? 'Published.' : 'Unpublished.', 'good');
+    viewAdmin();
+  } catch (err) { toast(friendly(err), 'bad'); }
+}
+async function deleteQuestionnaire(id, title) {
+  if (!confirm('Delete "' + title + '" and all user progress for it? This cannot be undone.')) return;
+  try {
+    unwrap(await sb.from('questionnaires').delete().eq('id', id).select());
+    toast('Deleted.', 'good');
+    viewAdmin();
+  } catch (err) { toast(friendly(err), 'bad'); }
+}
+
+/* ---------------- admin editor ---------------- */
+async function openEditor(id) {
+  if (!id) {
+    state.ed = { id: null, title: '', description: '', status: 'draft', questions: [], removed: [], dirty: false };
+    return go('editor');
+  }
+  loading('admin');
+  try {
+    const rs = await Promise.all([
+      sb.from('questionnaires').select('*').eq('id', id).single(),
+      sb.from('questions').select('*').eq('questionnaire_id', id).order('position')
+    ]);
+    const qn = unwrap(rs[0]), qs = unwrap(rs[1]);
+    state.ed = {
+      id: qn.id, title: qn.title, description: qn.description || '', status: qn.status, removed: [], dirty: false,
+      questions: qs.map(q => ({ key: newKey(), id: q.id, question: q.question, a: q.choice_a, b: q.choice_b, c: q.choice_c, d: q.choice_d, correct: q.correct_answer, explanation: q.explanation || '' }))
+    };
+    go('editor');
+  } catch (err) { toast(friendly(err), 'bad'); go('admin'); }
+}
+function qErrors(q) {
+  const e = [];
+  if (!q.question.trim()) e.push('Enter the question.');
+  const empty = LETTERS.filter(L => !q[L.toLowerCase()].trim());
+  if (empty.length) e.push('Fill in choice ' + empty.join(', ') + '.');
+  if (!q.correct) e.push('Select the correct answer.');
+  else if (!q[q.correct.toLowerCase()].trim()) e.push('The correct answer is blank.');
+  const vals = LETTERS.map(L => q[L.toLowerCase()].trim().toLowerCase()).filter(Boolean);
+  if (new Set(vals).size < vals.length) e.push('Two choices are identical.');
+  return e;
+}
+function cardHtml(q, i, n) {
+  return `<article class="qcard" data-i="${i}">
+    <div class="qcard-head"><h3>Question ${i + 1}</h3>
+      <div class="row">
+        <button class="btn btn-sm btn-quiet" data-act="ed-up" ${i === 0 ? 'disabled' : ''} aria-label="Move question ${i + 1} up">Move up</button>
+        <button class="btn btn-sm btn-quiet" data-act="ed-down" ${i === n - 1 ? 'disabled' : ''} aria-label="Move question ${i + 1} down">Move down</button>
+        <button class="btn btn-sm btn-danger" data-act="ed-remove" aria-label="Remove question ${i + 1}">Remove</button>
+      </div></div>
+    <div class="field"><label for="q-${q.key}">Question</label><textarea id="q-${q.key}" data-f="question">${esc(q.question)}</textarea></div>
+    <fieldset><legend>Choices. Select the correct one.</legend>
+      ${LETTERS.map(L => `<div class="choice-edit">
+        <input type="radio" name="c-${q.key}" value="${L}" ${q.correct === L ? 'checked' : ''} aria-label="Choice ${L} is correct">
+        <span class="letter" aria-hidden="true">${L}</span>
+        <input type="text" data-f="${L.toLowerCase()}" value="${esc(q[L.toLowerCase()])}" aria-label="Choice ${L} text">
+      </div>`).join('')}
+    </fieldset>
+    <div class="field"><label for="x-${q.key}">Explanation (optional)</label><textarea id="x-${q.key}" data-f="explanation" style="min-height:64px">${esc(q.explanation)}</textarea></div>
+    <p class="qerr" role="alert"></p>
+  </article>`;
+}
+function viewEditor() {
+  const ed = state.ed;
+  if (!ed) return go('admin');
+  const isNew = !ed.id, pub = ed.status === 'published';
+  const bar = pub
+    ? `<button class="btn btn-primary" data-act="ed-save">Save changes</button><button class="btn" data-act="ed-unpublish">Save and unpublish</button>`
+    : `<button class="btn btn-primary" data-act="ed-publish">Save and publish</button><button class="btn" data-act="ed-save">Save as draft</button>`;
+  app.innerHTML = shell(`
+    <div class="page-head"><div><h1 class="page-title">${isNew ? 'New questionnaire' : 'Review and edit'}${!isNew ? `<span class="pill ${pub ? 'pub' : 'draft'}">${pub ? 'Published' : 'Draft'}</span>` : ''}</h1>
+      <p class="muted">Upload a CSV, fix anything that looks off, then save.</p></div>
+      <button class="btn btn-quiet" data-act="go" data-view="admin">Back to admin</button></div>
+
+    <section class="panel">
+      <div class="field"><label for="ed-title">Title</label><input id="ed-title" type="text" data-ef="title" value="${esc(ed.title)}"></div>
+      <div class="field" style="margin-bottom:0"><label for="ed-desc">Description (optional)</label><textarea id="ed-desc" data-ef="description" style="min-height:64px">${esc(ed.description)}</textarea></div>
+    </section>
+
+    <section class="panel">
+      <h2>Add questions from a CSV</h2>
+      <p class="muted">Imported questions are added to the end of the list below.</p>
+      <div class="row" style="margin-top:.75rem"><button class="btn btn-sm" data-act="ed-template">Download CSV template</button></div>
+      <div class="import-grid">
+        <div><label for="csvfile">Upload a CSV file</label><input id="csvfile" type="file" accept=".csv,text/csv,.txt"></div>
+        <div><label for="csvpaste">Or paste CSV text</label><textarea id="csvpaste" placeholder="question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation"></textarea>
+          <div class="row" style="margin-top:.5rem"><button class="btn btn-sm" data-act="ed-read-paste">Read pasted text</button></div></div>
+      </div>
+    </section>
+
+    <h2 style="margin:1.5rem 0 .75rem;font-size:1.4rem">Questions (<span id="qcount">${ed.questions.length}</span>)</h2>
+    <div id="cards">${ed.questions.map((q, i) => cardHtml(q, i, ed.questions.length)).join('')}</div>
+    ${ed.questions.length ? '' : '<div class="empty" id="noq"><p>No questions yet. Import a CSV above or add one by hand.</p></div>'}
+    <div class="row" style="margin-top:.75rem"><button class="btn" data-act="ed-add">Add a question</button></div>
+
+    <div class="savebar"><span id="errcount" class="muted"></span><div class="row">${bar}</div></div>`, 'admin');
+  updateValidation();
+}
+function updateValidation() {
+  const ed = state.ed; if (!ed) return;
+  let bad = 0;
+  document.querySelectorAll('.qcard').forEach(card => {
+    const q = ed.questions[+card.dataset.i]; if (!q) return;
+    const errs = qErrors(q);
+    if (errs.length) bad++;
+    card.querySelector('.qerr').textContent = errs.join(' ');
+    card.classList.toggle('has-err', errs.length > 0);
+  });
+  const c = document.getElementById('errcount');
+  if (c) c.textContent = bad ? bad + ' question' + (bad > 1 ? 's' : '') + ' need attention' : (ed.questions.length ? 'All questions look good' : 'No questions yet');
+}
+function addImported(text) {
+  try {
+    const qs = parseQuestions(text);
+    if (!qs.length) throw new Error('No questions found in that file.');
+    state.ed.questions = state.ed.questions.concat(qs);
+    state.ed.dirty = true;
+    render();
+    const bad = qs.filter(q => qErrors(q).length).length;
+    toast('Added ' + qs.length + ' question' + (qs.length > 1 ? 's' : '') + (bad ? '. ' + bad + ' need attention.' : '. Review them below.'), bad ? '' : 'good');
+  } catch (err) { toast(err.message, 'bad'); }
+}
+async function saveEditor(mode) {
+  const ed = state.ed;
+  if (!ed || state.busy) return;
+  const title = ed.title.trim();
+  if (!title) { toast('Enter a title first.', 'bad'); document.getElementById('ed-title').focus(); return; }
+  const badIdx = ed.questions.findIndex(q => qErrors(q).length);
+  if (badIdx > -1) {
+    toast('Fix the highlighted questions first.', 'bad');
+    const card = document.querySelectorAll('.qcard')[badIdx];
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (mode === 'publish' && !ed.questions.length) { toast('Add at least one question before publishing.', 'bad'); return; }
+  if (ed.status === 'published' && ed.removed.length && !confirm('Removing questions changes progress for users who already started this test. Continue?')) return;
+  state.busy = true;
+  try {
+    const status = mode === 'publish' ? 'published' : mode === 'unpublish' ? 'draft' : ed.status;
+    const fields = { title, description: ed.description.trim() || null, status };
+    if (status === 'published' && ed.status !== 'published') fields.published_at = new Date().toISOString();
+    if (status === 'draft') fields.published_at = null;
+    if (!ed.id) {
+      fields.created_by = state.userId;
+      ed.id = unwrap(await sb.from('questionnaires').insert(fields).select().single()).id;
+    } else {
+      unwrap(await sb.from('questionnaires').update(fields).eq('id', ed.id).select());
+    }
+    const rows = ed.questions.map((q, i) => ({
+      questionnaire_id: ed.id, position: i + 1, question: q.question.trim(),
+      choice_a: q.a.trim(), choice_b: q.b.trim(), choice_c: q.c.trim(), choice_d: q.d.trim(),
+      correct_answer: q.correct, explanation: q.explanation.trim() || null
+    }));
+    const upd = [], ins = [];
+    ed.questions.forEach((q, i) => { if (q.id) upd.push(Object.assign({ id: q.id }, rows[i])); else ins.push(rows[i]); });
+    if (upd.length) unwrap(await sb.from('questions').upsert(upd).select('id'));
+    if (ins.length) unwrap(await sb.from('questions').insert(ins).select('id'));
+    if (ed.removed.length) unwrap(await sb.from('questions').delete().in('id', ed.removed).select('id'));
+    state.busy = false;
+    await openEditor(ed.id);
+    toast(mode === 'publish' ? 'Published.' : mode === 'unpublish' ? 'Saved and unpublished.' : 'Saved.', 'good');
+  } catch (err) { toast(friendly(err), 'bad'); }
+  finally { state.busy = false; }
+}
+
+/* editor inputs */
+document.addEventListener('input', e => {
+  const ed = state.ed;
+  if (state.view !== 'editor' || !ed) return;
+  const t = e.target;
+  if (t.dataset && t.dataset.ef) { ed[t.dataset.ef] = t.value; ed.dirty = true; return; }
+  const card = t.closest && t.closest('.qcard');
+  if (card && t.dataset.f) {
+    ed.questions[+card.dataset.i][t.dataset.f] = t.value;
+    ed.dirty = true; updateValidation();
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'csvfile' && t.files && t.files[0]) {
+    const file = t.files[0];
+    file.text().then(txt => { t.value = ''; addImported(txt); }).catch(() => toast('Could not read that file.', 'bad'));
+    return;
+  }
+  const card = t.closest && t.closest('.qcard');
+  if (state.view === 'editor' && card && t.type === 'radio') {
+    state.ed.questions[+card.dataset.i].correct = t.value;
+    state.ed.dirty = true; updateValidation();
+  }
+});
+
+/* ---------------- actions ---------------- */
+const actions = {
+  go(t) {
+    if (state.view === 'editor' && state.ed && state.ed.dirty && !confirm('You have unsaved changes. Leave without saving?')) return;
+    state.ed = state.view === 'editor' ? null : state.ed;
+    go(t.dataset.view);
+  },
+  async signout() {
+    if (state.view === 'editor' && state.ed && state.ed.dirty && !confirm('You have unsaved changes. Log out anyway?')) return;
+    await sb.auth.signOut();
+  },
+  start(t) {
+    if (t.dataset.mode === 'retake' && !confirm('Start this test again? Your earlier score is kept.')) return;
+    openQuiz(t.dataset.id, t.dataset.mode);
+  },
+  choose(t) { choose(t.dataset.letter); },
+  check() { checkAnswer(); },
+  next() { nextQuestion(); },
+  'adm-new'() { openEditor(null); },
+  'adm-edit'(t) { openEditor(t.dataset.id); },
+  'adm-toggle'(t) { toggleStatus(t.dataset.id, t.dataset.status, t.dataset.count); },
+  'adm-delete'(t) { deleteQuestionnaire(t.dataset.id, t.dataset.title); },
+  'ed-add'() {
+    state.ed.questions.push({ key: newKey(), question: '', a: '', b: '', c: '', d: '', correct: '', explanation: '' });
+    state.ed.dirty = true; render();
+    const cards = document.querySelectorAll('.qcard');
+    const last = cards[cards.length - 1];
+    if (last) { last.scrollIntoView({ block: 'center' }); const ta = last.querySelector('textarea'); if (ta) ta.focus(); }
+  },
+  'ed-up'(t) { moveQ(t, -1); },
+  'ed-down'(t) { moveQ(t, 1); },
+  'ed-remove'(t) {
+    const i = +t.closest('.qcard').dataset.i;
+    const q = state.ed.questions[i];
+    if (!confirm('Remove question ' + (i + 1) + '?')) return;
+    if (q.id) state.ed.removed.push(q.id);
+    state.ed.questions.splice(i, 1);
+    state.ed.dirty = true; render();
+  },
+  'ed-save'() { saveEditor('save'); },
+  'ed-publish'() { saveEditor('publish'); },
+  'ed-unpublish'() { saveEditor('unpublish'); },
+  'ed-template'() { downloadTemplate(); },
+  'ed-read-paste'() {
+    const ta = document.getElementById('csvpaste');
+    if (!ta.value.trim()) { toast('Paste your CSV text first.', 'bad'); return; }
+    addImported(ta.value);
+  }
+};
+function moveQ(t, d) {
+  const i = +t.closest('.qcard').dataset.i, j = i + d, qs = state.ed.questions;
+  if (j < 0 || j >= qs.length) return;
+  const tmp = qs[i]; qs[i] = qs[j]; qs[j] = tmp;
+  state.ed.dirty = true; render();
+  const card = document.querySelectorAll('.qcard')[j];
+  if (card) card.scrollIntoView({ block: 'center' });
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t || t.disabled) return;
+  const fn = actions[t.dataset.act];
+  if (fn) fn(t);
+});
+
+/* ---------------- router ---------------- */
+function render() {
+  switch (state.view) {
+    case 'login': return viewLogin();
+    case 'signup': return viewSignup();
+    case 'signupDone': return viewSignupDone();
+    case 'forgot': return viewForgot();
+    case 'reset': return viewReset();
+    case 'dashboard': return viewDashboard();
+    case 'quiz': return renderQuiz();
+    case 'results': return viewResults();
+    case 'admin': return viewAdmin();
+    case 'editor': return viewEditor();
+    default: app.innerHTML = '<div class="setup"><p class="muted">Loading...</p></div>';
+  }
+}
+render();
+})();
+</script>
+</body>
+</html>
