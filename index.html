@@ -133,8 +133,8 @@ textarea{resize:vertical;min-height:84px}
 .score{font:700 clamp(3.2rem,12vw,5.5rem)/1 var(--head);color:var(--brand)}
 .score small{font-size:.4em;color:var(--muted);font-weight:500}
 .results .row{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem}
-.review{margin-top:2rem}
-.review h2{font-size:1.4rem;margin-bottom:1rem}
+.review{margin-top:2rem;text-align:left}
+.review h2{font-size:1.4rem;margin-bottom:1rem;text-align:center}
 .miss-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.25rem;margin-bottom:.8rem}
 .miss-item .q{font-weight:700;white-space:pre-wrap;margin-bottom:.5rem}
 .miss-item .yours{color:var(--bad)}
@@ -236,6 +236,33 @@ function displayName() {
 function loading(active) {
   app.innerHTML = shell('<p class="muted">Loading...</p>', active);
 }
+
+/* --- Randomization Helpers --- */
+function hashCode(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function seededShuffle(array, seed) {
+  let m = 0x80000000, a = 1103515245, c = 12345;
+  let stateVal = seed;
+  const nextRandom = () => {
+    stateVal = (a * stateVal + c) % m;
+    return stateVal / (m - 1);
+  };
+  
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(nextRandom() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+/* ------------------------------------------- */
 
 /* ---------------- shell ---------------- */
 function shell(inner, active) {
@@ -458,21 +485,30 @@ async function openQuiz(id, mode) {
   try {
     const rs = await Promise.all([
       sb.from('questionnaires').select('id,title').eq('id', id).single(),
-      sb.from('questions').select('*').eq('questionnaire_id', id).order('position'),
+      sb.from('questions').select('*').eq('questionnaire_id', id),
       sb.from('attempts').select('*').eq('questionnaire_id', id).eq('user_id', state.userId).order('started_at', { ascending: false }).limit(1)
     ]);
     const qn = unwrap(rs[0]), qs = unwrap(rs[1]), atts = unwrap(rs[2]);
     if (!qs.length) { toast('This test has no questions yet.', 'bad'); return go('dashboard'); }
+    
     let attempt = atts[0];
     if (mode === 'retake' || !attempt || (attempt.completed_at && mode === 'continue')) {
       attempt = unwrap(await sb.from('attempts').insert({ user_id: state.userId, questionnaire_id: id }).select().single());
     }
+
+    // Randomize question order based on the attempt ID (keeps order consistent if resumed later)
+    const seed = hashCode(attempt.id);
+    const randomizedQs = seededShuffle(qs, seed);
+
     const ans = unwrap(await sb.from('attempt_answers').select('question_id,chosen,is_correct').eq('attempt_id', attempt.id));
     const answers = new Map(ans.map(a => [a.question_id, a]));
-    state.quiz = { qn, qs, attempt, answers, idx: 0, selected: null, checked: false };
+    
+    state.quiz = { qn, qs: randomizedQs, attempt, answers, idx: 0, selected: null, checked: false };
     if (mode === 'results' && attempt.completed_at) { go('results'); return; }
-    const first = qs.findIndex(q => !answers.has(q.id));
+    
+    const first = randomizedQs.findIndex(q => !answers.has(q.id));
     if (first === -1) { await finishAttempt(); return; }
+    
     state.quiz.idx = first;
     go('quiz');
   } catch (err) {
@@ -599,416 +635,56 @@ function viewResults() {
     const yours = a.chosen, right = q.correct_answer;
     return `<div class="miss-item">
       <p class="q">${esc(q.question)}</p>
-      <p class="yours">Your answer: ${yours}. ${esc(q['choice_' + yours.toLowerCase()])}</p>
-      <p class="right">Correct answer: ${right}. ${esc(q['choice_' + right.toLowerCase()])}</p>
-      ${q.explanation ? `<p class="why">${esc(q.explanation)}</p>` : ''}
+      <p>Your answer: <span class="yours">${yours}: ${esc(q['choice_' + yours.toLowerCase()])}</span></p>
+      <p class="right">Correct answer: ${right}: ${esc(q['choice_' + right.toLowerCase()])}</p>
+      ${q.explanation ? `<p class="why"><b>Why:</b> ${esc(q.explanation)}</p>` : ''}
     </div>`;
   }).join('');
-  app.innerHTML = shell(`
-    <div class="panel results">
-      <p class="muted">${esc(qz.qn.title)}</p>
-      <p class="score">${score}<small> / ${total}</small></p>
-      <p style="margin-top:.4rem;font-size:1.15rem">${pct}% correct</p>
-      <div class="row">
-        <button class="btn btn-primary" data-act="start" data-mode="retake" data-id="${qz.qn.id}">Retake this test</button>
+
+  app.innerHTML = shell(`<main class="wrap main">
+    <div class="results">
+      <div class="score">${score}<small> / ${total}</small></div>
+      <p class="muted" style="font-size:1.2rem;margin-top:.5rem">You scored ${pct}%</p>
+      <div class="row" style="justify-content:center">
+        <button class="btn btn-primary" data-act="start" data-mode="retake" data-id="${qz.qn.id}">Retake test</button>
         <button class="btn" data-act="go" data-view="dashboard">Back to my tests</button>
       </div>
+      ${missed.length ? `<div class="review"><h2>Review missed questions</h2>${items}</div>` : '<p style="margin-top:2rem" class="muted">Fantastic job! You got everything right.</p>'}
     </div>
-    <section class="review">
-      <h2>${missed.length ? 'Questions to review' : 'No missed questions'}</h2>
-      ${missed.length ? items : '<p class="muted">You got every question right.</p>'}
-    </section>`, 'dashboard');
+  </main>`, 'dashboard');
 }
 
-document.addEventListener('keydown', e => {
-  if (state.view !== 'quiz' || !state.quiz || state.quiz.checked) return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target.closest && e.target.closest('input,textarea')) return;
-  const k = e.key.toUpperCase();
-  const map = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
-  const letter = (k.length === 1 && 'ABCD'.indexOf(k) > -1) ? k : map[k];
-  if (letter) choose(letter);
-});
-
-/* ---------------- CSV ---------------- */
-const TEMPLATE = 'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation\r\n' +
-  'What is the capital of the Philippines?,Cebu,Manila,Davao,Baguio,B,Manila is the national capital.\r\n' +
-  'How many minutes are in 2 hours?,60,90,120,180,C,2 x 60 = 120.\r\n';
-
-function detectDelim(text) {
-  const first = text.replace(/^\uFEFF/, '').split(/\r?\n/)[0] || '';
-  const c = { ',': 0, '\t': 0, ';': 0 };
-  for (const ch of first) { if (Object.prototype.hasOwnProperty.call(c, ch)) c[ch]++; }
-  return Object.keys(c).sort((a, b) => c[b] - c[a])[0];
-}
-function parseCSVRows(text, delim) {
-  text = text.replace(/^\uFEFF/, '');
-  const rows = []; let row = [], field = '', inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
-      else field += c;
-    } else if (c === '"' && field === '') { inQ = true; }
-    else if (c === delim) { row.push(field); field = ''; }
-    else if (c === '\n' || c === '\r') {
-      if (c === '\r' && text[i + 1] === '\n') i++;
-      row.push(field); field = ''; rows.push(row); row = [];
-    } else field += c;
-  }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows.filter(r => r.some(v => v.trim() !== ''));
-}
-const ALIAS = {
-  question: ['question', 'questions', 'q'],
-  a: ['choice_a', 'a', 'option_a', 'choicea', 'optiona'],
-  b: ['choice_b', 'b', 'option_b', 'choiceb', 'optionb'],
-  c: ['choice_c', 'c', 'option_c', 'choicec', 'optionc'],
-  d: ['choice_d', 'd', 'option_d', 'choiced', 'optiond'],
-  correct: ['correct_answer', 'correct', 'answer', 'correct_option', 'key'],
-  explanation: ['explanation', 'rationale', 'reason']
-};
-function normAnswer(raw, q) {
-  const v = (raw || '').trim();
-  if (/^[a-d]$/i.test(v)) return v.toUpperCase();
-  const m = v.match(/^(?:choice|option)?\s*([a-d])\s*[).:\-]?$/i);
-  if (m) return m[1].toUpperCase();
-  const low = v.toLowerCase();
-  if (low) for (const L of LETTERS) { if ((q[L.toLowerCase()] || '').trim().toLowerCase() === low) return L; }
-  return '';
-}
-function parseQuestions(text) {
-  const rows = parseCSVRows(text, detectDelim(text));
-  if (rows.length < 2) throw new Error('No questions found. Make sure the first row is the header row and questions start on row 2.');
-  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[\s\-]+/g, '_'));
-  const idx = {}, missing = [];
-  Object.keys(ALIAS).forEach(k => {
-    idx[k] = head.findIndex(h => ALIAS[k].indexOf(h) > -1);
-    if (idx[k] === -1 && k !== 'explanation') missing.push(k === 'question' ? 'question' : k === 'correct' ? 'correct_answer' : 'choice_' + k);
-  });
-  if (missing.length) throw new Error('Missing column(s): ' + missing.join(', ') + '. Use the template for the right headers.');
-  const get = (r, k) => idx[k] > -1 ? (r[idx[k]] || '').trim() : '';
-  return rows.slice(1).map(r => {
-    const q = { key: newKey(), question: get(r, 'question'), a: get(r, 'a'), b: get(r, 'b'), c: get(r, 'c'), d: get(r, 'd'), explanation: get(r, 'explanation') };
-    q.correct = normAnswer(get(r, 'correct'), q);
-    return q;
-  });
-}
-function downloadTemplate() {
-  const blob = new Blob(['\uFEFF' + TEMPLATE], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'questions-template.csv';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
-/* ---------------- admin list ---------------- */
-async function viewAdmin() {
-  if (!(state.profile && state.profile.is_admin)) { toast('Admin access only.', 'bad'); return go('dashboard'); }
-  loading('admin');
-  try {
-    const rows = unwrap(await sb.from('questionnaires').select('id,title,status,created_at,questions(count)').order('created_at', { ascending: false }));
-    if (state.view !== 'admin') return;
-    const list = rows.map(r => {
-      const count = r.questions && r.questions[0] ? r.questions[0].count : 0;
-      const pub = r.status === 'published';
-      return `<div class="adm-row">
-        <div><h3>${esc(r.title)}<span class="pill ${pub ? 'pub' : 'draft'}">${pub ? 'Published' : 'Draft'}</span></h3>
-          <p class="muted">${count} question${count === 1 ? '' : 's'}</p></div>
-        <div class="row">
-          <button class="btn btn-sm" data-act="adm-edit" data-id="${r.id}">Review and edit</button>
-          <button class="btn btn-sm" data-act="adm-toggle" data-id="${r.id}" data-status="${r.status}" data-count="${count}">${pub ? 'Unpublish' : 'Publish'}</button>
-          <button class="btn btn-sm btn-danger" data-act="adm-delete" data-id="${r.id}" data-title="${esc(r.title)}">Delete</button>
-        </div></div>`;
-    }).join('');
-    app.innerHTML = shell(`
-      <div class="page-head"><div><h1 class="page-title">Admin</h1><p class="muted">Upload questions, review them, then publish to users.</p></div>
-        <button class="btn btn-primary" data-act="adm-new">New questionnaire</button></div>
-      ${rows.length ? `<div class="tests">${list}</div>` : '<div class="empty"><p>No questionnaires yet.</p><p style="margin-top:.3rem">Click New questionnaire to upload your first CSV.</p></div>'}`, 'admin');
-  } catch (err) {
-    app.innerHTML = shell(`<p class="msg err">${esc(friendly(err))}</p><button class="btn" data-act="go" data-view="admin">Try again</button>`, 'admin');
-  }
-}
-async function toggleStatus(id, status, count) {
-  try {
-    if (status !== 'published' && !Number(count)) { toast('Add at least one question before publishing.', 'bad'); return; }
-    const pub = status !== 'published';
-    unwrap(await sb.from('questionnaires').update({ status: pub ? 'published' : 'draft', published_at: pub ? new Date().toISOString() : null }).eq('id', id).select());
-    toast(pub ? 'Published.' : 'Unpublished.', 'good');
-    viewAdmin();
-  } catch (err) { toast(friendly(err), 'bad'); }
-}
-async function deleteQuestionnaire(id, title) {
-  if (!confirm('Delete "' + title + '" and all user progress for it? This cannot be undone.')) return;
-  try {
-    unwrap(await sb.from('questionnaires').delete().eq('id', id).select());
-    toast('Deleted.', 'good');
-    viewAdmin();
-  } catch (err) { toast(friendly(err), 'bad'); }
-}
-
-/* ---------------- admin editor ---------------- */
-async function openEditor(id) {
-  if (!id) {
-    state.ed = { id: null, title: '', description: '', status: 'draft', questions: [], removed: [], dirty: false };
-    return go('editor');
-  }
-  loading('admin');
-  try {
-    const rs = await Promise.all([
-      sb.from('questionnaires').select('*').eq('id', id).single(),
-      sb.from('questions').select('*').eq('questionnaire_id', id).order('position')
-    ]);
-    const qn = unwrap(rs[0]), qs = unwrap(rs[1]);
-    state.ed = {
-      id: qn.id, title: qn.title, description: qn.description || '', status: qn.status, removed: [], dirty: false,
-      questions: qs.map(q => ({ key: newKey(), id: q.id, question: q.question, a: q.choice_a, b: q.choice_b, c: q.choice_c, d: q.choice_d, correct: q.correct_answer, explanation: q.explanation || '' }))
-    };
-    go('editor');
-  } catch (err) { toast(friendly(err), 'bad'); go('admin'); }
-}
-function qErrors(q) {
-  const e = [];
-  if (!q.question.trim()) e.push('Enter the question.');
-  const empty = LETTERS.filter(L => !q[L.toLowerCase()].trim());
-  if (empty.length) e.push('Fill in choice ' + empty.join(', ') + '.');
-  if (!q.correct) e.push('Select the correct answer.');
-  else if (!q[q.correct.toLowerCase()].trim()) e.push('The correct answer is blank.');
-  const vals = LETTERS.map(L => q[L.toLowerCase()].trim().toLowerCase()).filter(Boolean);
-  if (new Set(vals).size < vals.length) e.push('Two choices are identical.');
-  return e;
-}
-function cardHtml(q, i, n) {
-  return `<article class="qcard" data-i="${i}">
-    <div class="qcard-head"><h3>Question ${i + 1}</h3>
-      <div class="row">
-        <button class="btn btn-sm btn-quiet" data-act="ed-up" ${i === 0 ? 'disabled' : ''} aria-label="Move question ${i + 1} up">Move up</button>
-        <button class="btn btn-sm btn-quiet" data-act="ed-down" ${i === n - 1 ? 'disabled' : ''} aria-label="Move question ${i + 1} down">Move down</button>
-        <button class="btn btn-sm btn-danger" data-act="ed-remove" aria-label="Remove question ${i + 1}">Remove</button>
-      </div></div>
-    <div class="field"><label for="q-${q.key}">Question</label><textarea id="q-${q.key}" data-f="question">${esc(q.question)}</textarea></div>
-    <fieldset><legend>Choices. Select the correct one.</legend>
-      ${LETTERS.map(L => `<div class="choice-edit">
-        <input type="radio" name="c-${q.key}" value="${L}" ${q.correct === L ? 'checked' : ''} aria-label="Choice ${L} is correct">
-        <span class="letter" aria-hidden="true">${L}</span>
-        <input type="text" data-f="${L.toLowerCase()}" value="${esc(q[L.toLowerCase()])}" aria-label="Choice ${L} text">
-      </div>`).join('')}
-    </fieldset>
-    <div class="field"><label for="x-${q.key}">Explanation (optional)</label><textarea id="x-${q.key}" data-f="explanation" style="min-height:64px">${esc(q.explanation)}</textarea></div>
-    <p class="qerr" role="alert"></p>
-  </article>`;
-}
-function viewEditor() {
-  const ed = state.ed;
-  if (!ed) return go('admin');
-  const isNew = !ed.id, pub = ed.status === 'published';
-  const bar = pub
-    ? `<button class="btn btn-primary" data-act="ed-save">Save changes</button><button class="btn" data-act="ed-unpublish">Save and unpublish</button>`
-    : `<button class="btn btn-primary" data-act="ed-publish">Save and publish</button><button class="btn" data-act="ed-save">Save as draft</button>`;
-  app.innerHTML = shell(`
-    <div class="page-head"><div><h1 class="page-title">${isNew ? 'New questionnaire' : 'Review and edit'}${!isNew ? `<span class="pill ${pub ? 'pub' : 'draft'}">${pub ? 'Published' : 'Draft'}</span>` : ''}</h1>
-      <p class="muted">Upload a CSV, fix anything that looks off, then save.</p></div>
-      <button class="btn btn-quiet" data-act="go" data-view="admin">Back to admin</button></div>
-
-    <section class="panel">
-      <div class="field"><label for="ed-title">Title</label><input id="ed-title" type="text" data-ef="title" value="${esc(ed.title)}"></div>
-      <div class="field" style="margin-bottom:0"><label for="ed-desc">Description (optional)</label><textarea id="ed-desc" data-ef="description" style="min-height:64px">${esc(ed.description)}</textarea></div>
-    </section>
-
-    <section class="panel">
-      <h2>Add questions from a CSV</h2>
-      <p class="muted">Imported questions are added to the end of the list below.</p>
-      <div class="row" style="margin-top:.75rem"><button class="btn btn-sm" data-act="ed-template">Download CSV template</button></div>
-      <div class="import-grid">
-        <div><label for="csvfile">Upload a CSV file</label><input id="csvfile" type="file" accept=".csv,text/csv,.txt"></div>
-        <div><label for="csvpaste">Or paste CSV text</label><textarea id="csvpaste" placeholder="question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation"></textarea>
-          <div class="row" style="margin-top:.5rem"><button class="btn btn-sm" data-act="ed-read-paste">Read pasted text</button></div></div>
-      </div>
-    </section>
-
-    <h2 style="margin:1.5rem 0 .75rem;font-size:1.4rem">Questions (<span id="qcount">${ed.questions.length}</span>)</h2>
-    <div id="cards">${ed.questions.map((q, i) => cardHtml(q, i, ed.questions.length)).join('')}</div>
-    ${ed.questions.length ? '' : '<div class="empty" id="noq"><p>No questions yet. Import a CSV above or add one by hand.</p></div>'}
-    <div class="row" style="margin-top:.75rem"><button class="btn" data-act="ed-add">Add a question</button></div>
-
-    <div class="savebar"><span id="errcount" class="muted"></span><div class="row">${bar}</div></div>`, 'admin');
-  updateValidation();
-}
-function updateValidation() {
-  const ed = state.ed; if (!ed) return;
-  let bad = 0;
-  document.querySelectorAll('.qcard').forEach(card => {
-    const q = ed.questions[+card.dataset.i]; if (!q) return;
-    const errs = qErrors(q);
-    if (errs.length) bad++;
-    card.querySelector('.qerr').textContent = errs.join(' ');
-    card.classList.toggle('has-err', errs.length > 0);
-  });
-  const c = document.getElementById('errcount');
-  if (c) c.textContent = bad ? bad + ' question' + (bad > 1 ? 's' : '') + ' need attention' : (ed.questions.length ? 'All questions look good' : 'No questions yet');
-}
-function addImported(text) {
-  try {
-    const qs = parseQuestions(text);
-    if (!qs.length) throw new Error('No questions found in that file.');
-    state.ed.questions = state.ed.questions.concat(qs);
-    state.ed.dirty = true;
-    render();
-    const bad = qs.filter(q => qErrors(q).length).length;
-    toast('Added ' + qs.length + ' question' + (qs.length > 1 ? 's' : '') + (bad ? '. ' + bad + ' need attention.' : '. Review them below.'), bad ? '' : 'good');
-  } catch (err) { toast(err.message, 'bad'); }
-}
-async function saveEditor(mode) {
-  const ed = state.ed;
-  if (!ed || state.busy) return;
-  const title = ed.title.trim();
-  if (!title) { toast('Enter a title first.', 'bad'); document.getElementById('ed-title').focus(); return; }
-  const badIdx = ed.questions.findIndex(q => qErrors(q).length);
-  if (badIdx > -1) {
-    toast('Fix the highlighted questions first.', 'bad');
-    const card = document.querySelectorAll('.qcard')[badIdx];
-    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
-  }
-  if (mode === 'publish' && !ed.questions.length) { toast('Add at least one question before publishing.', 'bad'); return; }
-  if (ed.status === 'published' && ed.removed.length && !confirm('Removing questions changes progress for users who already started this test. Continue?')) return;
-  state.busy = true;
-  try {
-    const status = mode === 'publish' ? 'published' : mode === 'unpublish' ? 'draft' : ed.status;
-    const fields = { title, description: ed.description.trim() || null, status };
-    if (status === 'published' && ed.status !== 'published') fields.published_at = new Date().toISOString();
-    if (status === 'draft') fields.published_at = null;
-    if (!ed.id) {
-      fields.created_by = state.userId;
-      ed.id = unwrap(await sb.from('questionnaires').insert(fields).select().single()).id;
-    } else {
-      unwrap(await sb.from('questionnaires').update(fields).eq('id', ed.id).select());
-    }
-    const rows = ed.questions.map((q, i) => ({
-      questionnaire_id: ed.id, position: i + 1, question: q.question.trim(),
-      choice_a: q.a.trim(), choice_b: q.b.trim(), choice_c: q.c.trim(), choice_d: q.d.trim(),
-      correct_answer: q.correct, explanation: q.explanation.trim() || null
-    }));
-    const upd = [], ins = [];
-    ed.questions.forEach((q, i) => { if (q.id) upd.push(Object.assign({ id: q.id }, rows[i])); else ins.push(rows[i]); });
-    if (upd.length) unwrap(await sb.from('questions').upsert(upd).select('id'));
-    if (ins.length) unwrap(await sb.from('questions').insert(ins).select('id'));
-    if (ed.removed.length) unwrap(await sb.from('questions').delete().in('id', ed.removed).select('id'));
-    state.busy = false;
-    await openEditor(ed.id);
-    toast(mode === 'publish' ? 'Published.' : mode === 'unpublish' ? 'Saved and unpublished.' : 'Saved.', 'good');
-  } catch (err) { toast(friendly(err), 'bad'); }
-  finally { state.busy = false; }
-}
-
-/* editor inputs */
-document.addEventListener('input', e => {
-  const ed = state.ed;
-  if (state.view !== 'editor' || !ed) return;
-  const t = e.target;
-  if (t.dataset && t.dataset.ef) { ed[t.dataset.ef] = t.value; ed.dirty = true; return; }
-  const card = t.closest && t.closest('.qcard');
-  if (card && t.dataset.f) {
-    ed.questions[+card.dataset.i][t.dataset.f] = t.value;
-    ed.dirty = true; updateValidation();
-  }
-});
-document.addEventListener('change', e => {
-  const t = e.target;
-  if (t.id === 'csvfile' && t.files && t.files[0]) {
-    const file = t.files[0];
-    file.text().then(txt => { t.value = ''; addImported(txt); }).catch(() => toast('Could not read that file.', 'bad'));
-    return;
-  }
-  const card = t.closest && t.closest('.qcard');
-  if (state.view === 'editor' && card && t.type === 'radio') {
-    state.ed.questions[+card.dataset.i].correct = t.value;
-    state.ed.dirty = true; updateValidation();
-  }
-});
-
-/* ---------------- actions ---------------- */
-const actions = {
-  go(t) {
-    if (state.view === 'editor' && state.ed && state.ed.dirty && !confirm('You have unsaved changes. Leave without saving?')) return;
-    state.ed = state.view === 'editor' ? null : state.ed;
-    go(t.dataset.view);
-  },
-  async signout() {
-    if (state.view === 'editor' && state.ed && state.ed.dirty && !confirm('You have unsaved changes. Log out anyway?')) return;
-    await sb.auth.signOut();
-  },
-  start(t) {
-    if (t.dataset.mode === 'retake' && !confirm('Start this test again? Your earlier score is kept.')) return;
-    openQuiz(t.dataset.id, t.dataset.mode);
-  },
-  choose(t) { choose(t.dataset.letter); },
-  check() { checkAnswer(); },
-  next() { nextQuestion(); },
-  'adm-new'() { openEditor(null); },
-  'adm-edit'(t) { openEditor(t.dataset.id); },
-  'adm-toggle'(t) { toggleStatus(t.dataset.id, t.dataset.status, t.dataset.count); },
-  'adm-delete'(t) { deleteQuestionnaire(t.dataset.id, t.dataset.title); },
-  'ed-add'() {
-    state.ed.questions.push({ key: newKey(), question: '', a: '', b: '', c: '', d: '', correct: '', explanation: '' });
-    state.ed.dirty = true; render();
-    const cards = document.querySelectorAll('.qcard');
-    const last = cards[cards.length - 1];
-    if (last) { last.scrollIntoView({ block: 'center' }); const ta = last.querySelector('textarea'); if (ta) ta.focus(); }
-  },
-  'ed-up'(t) { moveQ(t, -1); },
-  'ed-down'(t) { moveQ(t, 1); },
-  'ed-remove'(t) {
-    const i = +t.closest('.qcard').dataset.i;
-    const q = state.ed.questions[i];
-    if (!confirm('Remove question ' + (i + 1) + '?')) return;
-    if (q.id) state.ed.removed.push(q.id);
-    state.ed.questions.splice(i, 1);
-    state.ed.dirty = true; render();
-  },
-  'ed-save'() { saveEditor('save'); },
-  'ed-publish'() { saveEditor('publish'); },
-  'ed-unpublish'() { saveEditor('unpublish'); },
-  'ed-template'() { downloadTemplate(); },
-  'ed-read-paste'() {
-    const ta = document.getElementById('csvpaste');
-    if (!ta.value.trim()) { toast('Paste your CSV text first.', 'bad'); return; }
-    addImported(ta.value);
-  }
-};
-function moveQ(t, d) {
-  const i = +t.closest('.qcard').dataset.i, j = i + d, qs = state.ed.questions;
-  if (j < 0 || j >= qs.length) return;
-  const tmp = qs[i]; qs[i] = qs[j]; qs[j] = tmp;
-  state.ed.dirty = true; render();
-  const card = document.querySelectorAll('.qcard')[j];
-  if (card) card.scrollIntoView({ block: 'center' });
-}
-document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act]');
-  if (!t || t.disabled) return;
-  const fn = actions[t.dataset.act];
-  if (fn) fn(t);
-});
-
-/* ---------------- router ---------------- */
+/* ---------------- global action router ---------------- */
 function render() {
-  switch (state.view) {
-    case 'login': return viewLogin();
-    case 'signup': return viewSignup();
-    case 'signupDone': return viewSignupDone();
-    case 'forgot': return viewForgot();
-    case 'reset': return viewReset();
-    case 'dashboard': return viewDashboard();
-    case 'quiz': return renderQuiz();
-    case 'results': return viewResults();
-    case 'admin': return viewAdmin();
-    case 'editor': return viewEditor();
-    default: app.innerHTML = '<div class="setup"><p class="muted">Loading...</p></div>';
+  if (!state.session) {
+    if (['signup', 'signupDone', 'forgot', 'reset'].includes(state.view)) {
+      if (state.view === 'signup') viewSignup();
+      else if (state.view === 'signupDone') viewSignupDone();
+      else if (state.view === 'forgot') viewForgot();
+      else if (state.view === 'reset') viewReset();
+    } else {
+      viewLogin();
+    }
+    return;
   }
+  if (state.view === 'dashboard') viewDashboard();
+  else if (state.view === 'quiz') renderQuiz();
+  else if (state.view === 'results') viewResults();
+  else viewDashboard();
 }
-render();
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  if (act === 'go') go(btn.dataset.view);
+  else if (act === 'signout') sb.auth.signOut();
+  else if (act === 'start') openQuiz(btn.dataset.id, btn.dataset.mode);
+  else if (act === 'choose') choose(btn.dataset.letter);
+  else if (act === 'check') checkAnswer();
+  else if (act === 'next') nextQuestion();
+});
+
 })();
 </script>
 </body>
