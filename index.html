@@ -254,7 +254,7 @@ function seededShuffle(array, seed) {
     stateVal = (a * stateVal + c) % m;
     return stateVal / (m - 1);
   };
-  
+
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(nextRandom() * (i + 1));
@@ -490,7 +490,7 @@ async function openQuiz(id, mode) {
     ]);
     const qn = unwrap(rs[0]), qs = unwrap(rs[1]), atts = unwrap(rs[2]);
     if (!qs.length) { toast('This test has no questions yet.', 'bad'); return go('dashboard'); }
-    
+
     let attempt = atts[0];
     if (mode === 'retake' || !attempt || (attempt.completed_at && mode === 'continue')) {
       attempt = unwrap(await sb.from('attempts').insert({ user_id: state.userId, questionnaire_id: id }).select().single());
@@ -502,13 +502,13 @@ async function openQuiz(id, mode) {
 
     const ans = unwrap(await sb.from('attempt_answers').select('question_id,chosen,is_correct').eq('attempt_id', attempt.id));
     const answers = new Map(ans.map(a => [a.question_id, a]));
-    
+
     state.quiz = { qn, qs: randomizedQs, attempt, answers, idx: 0, selected: null, checked: false };
     if (mode === 'results' && attempt.completed_at) { go('results'); return; }
-    
+
     const first = randomizedQs.findIndex(q => !answers.has(q.id));
     if (first === -1) { await finishAttempt(); return; }
-    
+
     state.quiz.idx = first;
     go('quiz');
   } catch (err) {
@@ -654,6 +654,299 @@ function viewResults() {
   </main>`, 'dashboard');
 }
 
+/* ---------------- admin: list ---------------- */
+function isAdmin() { return !!(state.profile && state.profile.is_admin); }
+
+async function viewAdmin() {
+  if (!isAdmin()) { toast('Admins only.', 'bad'); return go('dashboard'); }
+  loading('admin');
+  try {
+    const list = unwrap(await sb.from('questionnaires').select('id,title,description,status,published_at,questions(count)'));
+    if (state.view !== 'admin') return;
+    list.sort((a, b) => String(a.title).localeCompare(String(b.title)));
+
+    const rows = list.map(q => {
+      const total = q.questions && q.questions[0] ? q.questions[0].count : 0;
+      const pub = q.status === 'published';
+      return `<div class="adm-row">
+        <div>
+          <h3>${esc(q.title)}<span class="pill ${pub ? 'pub' : 'draft'}">${pub ? 'Published' : 'Draft'}</span></h3>
+          <p class="muted">${total} question${total === 1 ? '' : 's'}${q.description ? ' · ' + esc(q.description) : ''}</p>
+        </div>
+        <div class="row">
+          <button class="btn btn-sm" data-act="ed-open" data-id="${q.id}">Edit</button>
+          <button class="btn btn-sm" data-act="toggle-pub" data-id="${q.id}" data-pub="${pub ? '1' : '0'}" data-total="${total}">${pub ? 'Unpublish' : 'Publish'}</button>
+          <button class="btn btn-sm btn-danger" data-act="del-test" data-id="${q.id}" data-title="${esc(q.title)}">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    app.innerHTML = shell(`
+      <div class="page-head"><div><h1 class="page-title">Admin</h1><p class="muted">Create tests, edit questions, and publish them to users.</p></div></div>
+      <section class="panel">
+        <h2>Add a new test</h2>
+        <p class="muted">Upload a CSV to import many questions at once, or start blank and type them in.</p>
+        <div class="import-grid">
+          <div>
+            <div class="field"><label for="imp-title">Test title</label><input id="imp-title" type="text" placeholder="e.g. Fire Safety Review 1"></div>
+            <div class="field"><label for="imp-desc">Description (optional)</label><input id="imp-desc" type="text"></div>
+          </div>
+          <div>
+            <div class="field"><label for="imp-file">CSV file</label><input id="imp-file" type="file" accept=".csv,text/csv">
+              <p class="hint">Columns: question, choice_a, choice_b, choice_c, choice_d, correct_answer (A, B, C or D), explanation (optional).</p></div>
+            <div class="row">
+              <button class="btn btn-primary" data-act="import-csv">Import CSV</button>
+              <button class="btn" data-act="blank-test">Start blank</button>
+              <button class="btn btn-quiet" data-act="dl-template">Download template</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>All tests</h2>
+        ${rows || '<p class="muted" style="margin-top:.5rem">Nothing here yet. Add your first test above.</p>'}
+      </section>`, 'admin');
+  } catch (err) {
+    app.innerHTML = shell(`<p class="msg err">${esc(friendly(err))}</p><button class="btn" data-act="go" data-view="admin">Try again</button>`, 'admin');
+  }
+}
+
+/* ---------------- admin: CSV ---------------- */
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(c => c.trim() !== '')) rows.push(row);
+      row = [];
+    } else field += ch;
+  }
+  row.push(field);
+  if (row.some(c => c.trim() !== '')) rows.push(row);
+  return rows;
+}
+function csvToQuestions(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw { message: 'The CSV needs a header row and at least one question.' };
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const idx = n => head.indexOf(n);
+  const need = ['question', 'choice_a', 'choice_b', 'choice_c', 'choice_d', 'correct_answer'];
+  const miss = need.filter(n => idx(n) === -1);
+  if (miss.length) throw { message: 'Missing column(s): ' + miss.join(', ') + '.' };
+  return rows.slice(1).map(r => {
+    const g = n => idx(n) === -1 ? '' : String(r[idx(n)] == null ? '' : r[idx(n)]).trim();
+    let correct = g('correct_answer').toUpperCase().charAt(0);
+    if (LETTERS.indexOf(correct) === -1) correct = '';
+    return { key: newKey(), id: null, question: g('question'), a: g('choice_a'), b: g('choice_b'), c: g('choice_c'), d: g('choice_d'), correct, explanation: g('explanation') };
+  });
+}
+function downloadTemplate() {
+  const csv = 'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation\n' +
+    '"What is the capital of France?",Berlin,Madrid,Paris,Rome,C,"Paris is the capital and largest city of France."\n';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'questions-template.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function importCsv() {
+  const file = document.getElementById('imp-file').files[0];
+  if (!file) return toast('Choose a CSV file first.', 'bad');
+  const reader = new FileReader();
+  reader.onerror = () => toast('Could not read that file.', 'bad');
+  reader.onload = () => {
+    try {
+      const qs = csvToQuestions(String(reader.result));
+      const title = document.getElementById('imp-title').value.trim() || file.name.replace(/\.[^.]+$/, '');
+      const description = document.getElementById('imp-desc').value.trim();
+      state.ed = { id: null, title, description, status: 'draft', qs, removed: [], errs: {} };
+      toast(qs.length + ' question' + (qs.length === 1 ? '' : 's') + ' imported. Review, then save.', 'good');
+      go('editor');
+    } catch (err) { toast(friendly(err), 'bad'); }
+  };
+  reader.readAsText(file);
+}
+function blankTest() {
+  const title = document.getElementById('imp-title').value.trim();
+  const description = document.getElementById('imp-desc').value.trim();
+  state.ed = { id: null, title, description, status: 'draft', qs: [blankQ()], removed: [], errs: {} };
+  go('editor');
+}
+function blankQ() { return { key: newKey(), id: null, question: '', a: '', b: '', c: '', d: '', correct: '', explanation: '' }; }
+
+/* ---------------- admin: editor ---------------- */
+async function openEditor(id) {
+  loading('admin');
+  try {
+    const rs = await Promise.all([
+      sb.from('questionnaires').select('id,title,description,status').eq('id', id).single(),
+      sb.from('questions').select('*').eq('questionnaire_id', id)
+    ]);
+    const qn = unwrap(rs[0]), qs = unwrap(rs[1]);
+    qs.sort((x, y) => (x.position != null && y.position != null) ? x.position - y.position : String(x.created_at || '').localeCompare(String(y.created_at || '')));
+    state.ed = {
+      id: qn.id, title: qn.title || '', description: qn.description || '', status: qn.status,
+      qs: qs.map(q => ({ key: newKey(), id: q.id, question: q.question || '', a: q.choice_a || '', b: q.choice_b || '', c: q.choice_c || '', d: q.choice_d || '', correct: q.correct_answer || '', explanation: q.explanation || '' })),
+      removed: [], errs: {}
+    };
+    go('editor');
+  } catch (err) { toast(friendly(err), 'bad'); go('admin'); }
+}
+
+function viewEditor() {
+  const ed = state.ed;
+  if (!ed || !isAdmin()) return go('admin');
+  const cards = ed.qs.map((q, i) => {
+    const err = ed.errs[q.key];
+    const choiceRows = LETTERS.map(L => {
+      const f = L.toLowerCase();
+      return `<div class="choice-edit">
+        <input type="radio" name="correct-${q.key}" value="${L}" data-f="correct" ${q.correct === L ? 'checked' : ''} aria-label="Mark ${L} as the correct answer">
+        <span class="letter">${L}</span>
+        <input type="text" data-f="${f}" value="${esc(q[f])}" aria-label="Choice ${L}">
+      </div>`;
+    }).join('');
+    return `<div class="qcard ${err ? 'has-err' : ''}" data-key="${q.key}">
+      <div class="qcard-head"><h3>Question ${i + 1}</h3><button class="btn btn-sm btn-danger" data-act="ed-del-q" data-key="${q.key}">Remove</button></div>
+      <div class="field"><label>Question</label><textarea data-f="question">${esc(q.question)}</textarea></div>
+      <fieldset><legend>Choices (select the correct one)</legend>${choiceRows}</fieldset>
+      <div class="field" style="margin-bottom:0"><label>Explanation (optional)</label><textarea data-f="explanation">${esc(q.explanation)}</textarea></div>
+      ${err ? `<p class="qerr">${esc(err)}</p>` : ''}
+    </div>`;
+  }).join('');
+
+  app.innerHTML = shell(`
+    <div class="page-head">
+      <div><h1 class="page-title">${ed.id ? 'Edit test' : 'New test'}${ed.id ? `<span class="pill ${ed.status === 'published' ? 'pub' : 'draft'}">${ed.status === 'published' ? 'Published' : 'Draft'}</span>` : ''}</h1></div>
+      <button class="btn btn-quiet" data-act="ed-back">Back to admin</button>
+    </div>
+    <section class="panel">
+      <div class="field"><label for="ed-title">Test title</label><input id="ed-title" type="text" data-ed="title" value="${esc(ed.title)}"></div>
+      <div class="field" style="margin-bottom:0"><label for="ed-desc">Description (optional)</label><input id="ed-desc" type="text" data-ed="description" value="${esc(ed.description)}"></div>
+    </section>
+    ${cards || '<div class="empty">No questions yet. Add one below.</div>'}
+    <div class="row" style="margin-top:.5rem"><button class="btn" data-act="ed-add-q">Add question</button></div>
+    <div class="savebar">
+      <span class="muted">${ed.qs.length} question${ed.qs.length === 1 ? '' : 's'}</span>
+      <div class="row">
+        <button class="btn" data-act="ed-save" data-mode="keep">Save</button>
+        ${ed.status === 'published'
+          ? `<button class="btn btn-primary" data-act="ed-save" data-mode="keep">Save changes</button>`
+          : `<button class="btn btn-primary" data-act="ed-save" data-mode="publish">Save and publish</button>`}
+      </div>
+    </div>`, 'admin');
+}
+
+function onEditField(e) {
+  const ed = state.ed;
+  const el = e.target;
+  if (!ed || state.view !== 'editor') return;
+  if (el.dataset.ed) { ed[el.dataset.ed] = el.value; return; }
+  const f = el.dataset.f;
+  if (!f) return;
+  const card = el.closest('.qcard');
+  if (!card) return;
+  const q = ed.qs.find(x => x.key === card.dataset.key);
+  if (!q) return;
+  if (f === 'correct') { if (el.checked) q.correct = el.value; }
+  else q[f] = el.value;
+}
+document.addEventListener('input', onEditField);
+document.addEventListener('change', onEditField);
+
+async function saveEditor(mode) {
+  const ed = state.ed;
+  if (!ed || state.busy) return;
+  ed.errs = {};
+  const title = ed.title.trim();
+  if (!title) { toast('Give the test a title first.', 'bad'); return; }
+  if (!ed.qs.length) { toast('Add at least one question.', 'bad'); return; }
+  let bad = 0;
+  ed.qs.forEach((q, i) => {
+    const probs = [];
+    if (!q.question.trim()) probs.push('the question text');
+    LETTERS.forEach(L => { if (!q[L.toLowerCase()].trim()) probs.push('choice ' + L); });
+    if (!q.correct) probs.push('the correct answer');
+    if (probs.length) { ed.errs[q.key] = 'Missing: ' + probs.join(', ') + '.'; bad++; }
+  });
+  if (bad) {
+    viewEditor();
+    toast(bad + ' question' + (bad === 1 ? ' needs' : 's need') + ' attention.', 'bad');
+    const first = document.querySelector('.qcard.has-err');
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+
+  state.busy = true;
+  document.querySelectorAll('.savebar .btn').forEach(b => { b.disabled = true; });
+  try {
+    const status = mode === 'publish' ? 'published' : ed.status;
+    const base = { title, description: ed.description.trim() || null, status };
+    if (status === 'published' && ed.status !== 'published') base.published_at = new Date().toISOString();
+
+    if (ed.id) {
+      unwrap(await sb.from('questionnaires').update(base).eq('id', ed.id).select().single());
+    } else {
+      const row = unwrap(await sb.from('questionnaires').insert(base).select().single());
+      ed.id = row.id;
+    }
+    ed.status = status;
+
+    const toRow = q => ({ questionnaire_id: ed.id, question: q.question.trim(), choice_a: q.a.trim(), choice_b: q.b.trim(), choice_c: q.c.trim(), choice_d: q.d.trim(), correct_answer: q.correct, explanation: q.explanation.trim() || null });
+
+    if (ed.removed.length) {
+      unwrap(await sb.from('questions').delete().in('id', ed.removed));
+      ed.removed = [];
+    }
+    for (const q of ed.qs.filter(x => x.id)) {
+      unwrap(await sb.from('questions').update(toRow(q)).eq('id', q.id).select().single());
+    }
+    const fresh = ed.qs.filter(x => !x.id);
+    if (fresh.length) {
+      const inserted = unwrap(await sb.from('questions').insert(fresh.map(toRow)).select('id'));
+      fresh.forEach((q, i) => { if (inserted[i]) q.id = inserted[i].id; });
+    }
+    toast(status === 'published' ? 'Saved and published.' : 'Saved.', 'good');
+    state.busy = false;
+    if (mode === 'publish') { state.ed = null; go('admin'); }
+    else viewEditor();
+  } catch (err) {
+    state.busy = false;
+    toast(friendly(err), 'bad');
+    viewEditor();
+  }
+}
+
+async function togglePublish(id, isPub, total) {
+  if (!isPub && Number(total) === 0) return toast('Add questions before publishing.', 'bad');
+  try {
+    const patch = isPub ? { status: 'draft' } : { status: 'published', published_at: new Date().toISOString() };
+    unwrap(await sb.from('questionnaires').update(patch).eq('id', id).select().single());
+    toast(isPub ? 'Unpublished.' : 'Published.', 'good');
+    viewAdmin();
+  } catch (err) { toast(friendly(err), 'bad'); }
+}
+async function deleteTest(id, title) {
+  if (!window.confirm('Delete "' + title + '" and all its questions and user attempts? This cannot be undone.')) return;
+  try {
+    unwrap(await sb.from('questionnaires').delete().eq('id', id).select());
+    toast('Deleted.', 'good');
+    viewAdmin();
+  } catch (err) { toast(friendly(err), 'bad'); }
+}
+
 /* ---------------- global action router ---------------- */
 function render() {
   if (!state.session) {
@@ -670,6 +963,8 @@ function render() {
   if (state.view === 'dashboard') viewDashboard();
   else if (state.view === 'quiz') renderQuiz();
   else if (state.view === 'results') viewResults();
+  else if (state.view === 'admin') viewAdmin();
+  else if (state.view === 'editor') viewEditor();
   else viewDashboard();
 }
 
@@ -683,6 +978,33 @@ document.addEventListener('click', async e => {
   else if (act === 'choose') choose(btn.dataset.letter);
   else if (act === 'check') checkAnswer();
   else if (act === 'next') nextQuestion();
+  /* admin */
+  else if (act === 'import-csv') importCsv();
+  else if (act === 'blank-test') blankTest();
+  else if (act === 'dl-template') downloadTemplate();
+  else if (act === 'ed-open') openEditor(btn.dataset.id);
+  else if (act === 'ed-back') {
+    if (window.confirm('Leave this page? Unsaved changes will be lost.')) { state.ed = null; go('admin'); }
+  }
+  else if (act === 'ed-add-q') {
+    state.ed.qs.push(blankQ());
+    viewEditor();
+    const cards = document.querySelectorAll('.qcard');
+    if (cards.length) cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  else if (act === 'ed-del-q') {
+    const ed = state.ed;
+    const i = ed.qs.findIndex(q => q.key === btn.dataset.key);
+    if (i > -1) {
+      const [q] = ed.qs.splice(i, 1);
+      if (q.id) ed.removed.push(q.id);
+      delete ed.errs[q.key];
+      viewEditor();
+    }
+  }
+  else if (act === 'ed-save') saveEditor(btn.dataset.mode);
+  else if (act === 'toggle-pub') togglePublish(btn.dataset.id, btn.dataset.pub === '1', btn.dataset.total);
+  else if (act === 'del-test') deleteTest(btn.dataset.id, btn.dataset.title);
 });
 
 })();
